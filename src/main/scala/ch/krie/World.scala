@@ -1,39 +1,30 @@
 package ch.krie
 
-import java.awt.{Color, Point}
-
 import akka.actor.typed.scaladsl.Behaviors
-import akka.actor.typed.scaladsl.LoggerOps
-import akka.actor.typed.{ActorRef, ActorSystem, Behavior}
+import akka.actor.typed.{ActorRef, Behavior, Terminated}
 
+//https://github.com/johanandren/chat-with-akka-http-websockets/blob/akka-2.6/src/main/scala/chat/ChatRoom.scala#L1
 object World {
+  sealed trait Command
+  case class Join(user: ActorRef[DrawMessage]) extends Command
+  case class DrawMessage(paintedSpot: PaintedSpot) extends Command
 
-  sealed trait WorldRequest
-  final case class Register(deviceId: String, out: ActorRef[Device.Update]) extends WorldRequest
-  final case class Sync(deviceId: String) extends WorldRequest
-  final case class Update(deviceId: String, update: PaintedSpot) extends WorldRequest
+  def apply(): Behavior[Command] = run(Set.empty, Seq.empty)
 
-  def apply(): Behavior[WorldRequest] = {
-    worldBot(Map.empty)
-  }
-
-  //no restrictions on map right now
-  def worldBot(map: Map[Point, Color]): Behavior[WorldRequest] = Behaviors.receive { (ctx, msg) =>
-    msg match {
-      case Register(deviceId, ref) =>
-        ctx.log.info("I should be registering device right now")
-        //spawn baby
-        ctx.spawn(Device(deviceId, ref), deviceId)
-        ctx.self.tell(Sync(deviceId))
-        Behaviors.same
-      case Sync(deviceId) =>
-        ctx.log.info("I should be forwarding the whole world state right now")
-        //forward all world to one babe
-        Behaviors.same
-      case Update(deviceId, update: PaintedSpot) =>
-        ctx.log.info("I should be updating the record of my state and sending an update to my babes")
-        //update map and forward single update to every babe
-        Behaviors.same
+  private def run(users: Set[ActorRef[DrawMessage]], messageHistory: Seq[DrawMessage]): Behavior[Command] =
+    Behaviors.setup { context =>
+      Behaviors.receiveMessage[Command] {
+        case Join(user) =>
+          // watch so we can remove the user when if actor is stopped
+          context.watch(user)
+          messageHistory.foreach(msg => user ! msg)
+          run(users + user, messageHistory)
+        case msg: DrawMessage =>
+          users.foreach(_ ! msg)
+          run(users, messageHistory :+ msg)
+      }.receiveSignal {
+        case (__, Terminated(user)) =>
+          run(users.filterNot(_ == user), messageHistory)
+      }
     }
-  }
 }
