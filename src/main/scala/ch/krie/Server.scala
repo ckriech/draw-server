@@ -1,18 +1,15 @@
 package ch.krie
 
-import java.util.UUID
 
 import akka.NotUsed
-import akka.actor.typed.{ActorRef, ActorSystem, Props, SpawnProtocol}
-import akka.actor.typed.scaladsl.ActorContext
+import akka.actor.typed._
 import akka.actor.typed.scaladsl.Behaviors
 import akka.actor.typed.scaladsl.adapter._
 import akka.http.scaladsl._
 import akka.http.scaladsl.model.ws.Message
 import akka.http.scaladsl.model.ws.TextMessage
 import akka.http.scaladsl.server.Directives._
-import akka.stream.{CompletionStrategy, Materializer, OverflowStrategy, SystemMaterializer}
-import akka.stream.scaladsl.SourceQueueWithComplete
+import akka.stream.{Materializer, SystemMaterializer}
 import akka.stream.scaladsl.Flow
 import akka.stream.scaladsl.Sink
 import akka.stream.scaladsl.Source
@@ -37,7 +34,7 @@ object Server {
     implicit val ec = system.executionContext
     import akka.actor.typed.scaladsl.AskPattern._
     implicit val timeout: Timeout = 3.seconds
-    implicit val scheduler = system.scheduler
+    implicit val scheduler: Scheduler = system.scheduler
     val futureUserActor: Future[ActorRef[User.Event]] =
       userParent.ask(SpawnProtocol.Spawn(User(world), "user", Props.empty, _))
     val futureAckActor: Future[ActorRef[AckingReceiver.Ack]] =
@@ -82,9 +79,16 @@ object Server {
 
   }
 
-
-
   def main(args: Array[String]): Unit = {
+
+    val (interface, port) = if (args.headOption.isDefined) {
+      val split = args.head.split(":")
+
+      split(0) -> split(1).toInt
+    } else {
+      "localhost" -> 8080
+    }
+
     val system: ActorSystem[Any] =
       ActorSystem(
         Behaviors.setup[Any] { context =>
@@ -105,7 +109,7 @@ object Server {
           implicit val materializer: Materializer = SystemMaterializer(context.system).materializer
           implicit val classicSystem: akka.actor.ActorSystem = context.system.toClassic
           Http()
-            .bindAndHandle(route, "127.0.0.1", 8080)
+            .bindAndHandle(route, interface, port)
             // future callback, be careful not to touch actor state from in here
             .onComplete {
             case Success(binding) =>
@@ -120,7 +124,7 @@ object Server {
 
           Behaviors.empty
         },
-        "ChatServer"
+        "DrawServer"
       )
 
     println("Press enter to kill server")

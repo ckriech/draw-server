@@ -21,3 +21,34 @@ lazy val root = (project in file(".")).
       "org.scalatest"     %% "scalatest"                % "3.0.8"         % Test
     )
   )
+
+name := "Draw-server-prototype"
+
+version := "0.1"
+
+maintainer := "Chris Kriech <chris@krie.ch>"
+
+packageSummary := "server for co-op drawing tool"
+
+packageDescription := """blah blah blah"""
+
+assemblyJarName in assembly := "assembly-project.jar"
+
+enablePlugins(JavaServerAppPackaging)
+
+// removes all jar mappings in universal and appends the fat jar
+mappings in Universal := {
+  // universalMappings: Seq[(File,String)]
+  val universalMappings = (mappings in Universal).value
+  val fatJar = (assembly in Compile).value
+  // removing means filtering
+  val filtered = universalMappings filter {
+    case (_, n) =>  ! n.endsWith(".jar")
+  }
+  // add the fat jar
+  filtered :+ (fatJar -> ("lib/" + fatJar.getName))
+}
+
+// the bash scripts classpath only needs the fat jar
+scriptClasspath := Seq( (assemblyJarName in assembly).value )
+
