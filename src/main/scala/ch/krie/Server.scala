@@ -1,6 +1,9 @@
 package ch.krie
 
 
+import java.io.InputStream
+import java.security.{KeyStore, SecureRandom}
+
 import akka.NotUsed
 import akka.actor.typed._
 import akka.actor.typed.scaladsl.Behaviors
@@ -17,6 +20,7 @@ import akka.stream.typed.scaladsl.ActorSink
 import akka.stream.typed.scaladsl.ActorSource
 import akka.util.Timeout
 import ch.krie.api.NewSpot
+import javax.net.ssl.{KeyManagerFactory, SSLContext, TrustManagerFactory}
 import spray.json.{JsonParser, JsonReader}
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -89,7 +93,29 @@ object Server {
       "localhost" -> 8080
     }
 
-    val system: ActorSystem[Any] =
+    val pw: Option[String] = Option(args(1))
+
+    val system: ActorSystem[Any] = {
+
+      val https: Option[HttpsConnectionContext] = if (pw.isDefined) {
+
+        val keystorePath = args(2)
+
+        val ks: KeyStore = KeyStore.getInstance("PKCS12")
+        val keystore: InputStream = getClass.getClassLoader.getResourceAsStream(keystorePath)
+        ks.load(keystore, pw.get.toCharArray)
+
+        val keyManagerFactory: KeyManagerFactory = KeyManagerFactory.getInstance("SunX509")
+        keyManagerFactory.init(ks, pw.get.toCharArray)
+
+        val tmf: TrustManagerFactory = TrustManagerFactory.getInstance("SunX509")
+        tmf.init(ks)
+
+        val sslContext: SSLContext = SSLContext.getInstance("TLS")
+        sslContext.init(keyManagerFactory.getKeyManagers, tmf.getTrustManagers, new SecureRandom)
+        Some(ConnectionContext.https(sslContext))
+      } else None
+
       ActorSystem(
         Behaviors.setup[Any] { context =>
           implicit val ec: ExecutionContext = context.executionContext
@@ -108,13 +134,19 @@ object Server {
           // needed until Akka HTTP has a 2.6 only release
           implicit val materializer: Materializer = SystemMaterializer(context.system).materializer
           implicit val classicSystem: akka.actor.ActorSystem = context.system.toClassic
-          Http()
-            .bindAndHandle(route, interface, port)
+          if (https.isDefined) {
+            Http().setDefaultServerHttpContext(https.get)
+            Http()
+              .bindAndHandle(route, interface, port, connectionContext = https.get)
+          } else {
+            Http()
+              .bindAndHandle(route, interface, port)
+          }
             // future callback, be careful not to touch actor state from in here
             .onComplete {
-            case Success(binding) =>
+            case Success(b) =>
               println(
-                s"Started server at ${binding.localAddress.getHostString}:${binding.localAddress.getPort}"
+                s"Started server at ${b.localAddress.getHostString}:${b.localAddress.getPort}"
               )
             case Failure(ex) =>
               ex.printStackTrace()
@@ -127,8 +159,9 @@ object Server {
         "DrawServer"
       )
 
-    println("Press enter to kill server")
-    StdIn.readLine()
-    system.terminate()
+    }
+      println("Press enter to kill server")
+      StdIn.readLine()
+      system.terminate()
   }
 }
