@@ -113,7 +113,14 @@ object Server {
 
         val sslContext: SSLContext = SSLContext.getInstance("TLS")
         sslContext.init(keyManagerFactory.getKeyManagers, tmf.getTrustManagers, new SecureRandom)
-        Some(ConnectionContext.https(sslContext))
+
+        Some {
+          val httpsCC = ConnectionContext.https(sslContext)
+          sslContext.getDefaultSSLParameters.getCipherSuites.foreach(println)
+          httpsCC.enabledCipherSuites.foreach(_.foreach(println))
+          httpsCC
+        }
+
       } else None
 
       ActorSystem(
