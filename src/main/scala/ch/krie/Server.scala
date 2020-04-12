@@ -1,8 +1,6 @@
 package ch.krie
 
 
-import java.io.InputStream
-import java.security.{KeyStore, SecureRandom}
 
 import akka.NotUsed
 import akka.actor.typed._
@@ -20,7 +18,6 @@ import akka.stream.typed.scaladsl.ActorSink
 import akka.stream.typed.scaladsl.ActorSource
 import akka.util.Timeout
 import ch.krie.api.NewSpot
-import javax.net.ssl.{KeyManagerFactory, SSLContext, TrustManagerFactory}
 import spray.json.{JsonParser, JsonReader}
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -93,35 +90,7 @@ object Server {
       "localhost" -> 8080
     }
 
-    val pw: Option[String] = Option(args(1))
-
     val system: ActorSystem[Any] = {
-
-      val https: Option[HttpsConnectionContext] = if (pw.isDefined) {
-
-        val keystorePath = args(2)
-
-        val ks: KeyStore = KeyStore.getInstance("PKCS12")
-        val keystore: InputStream = getClass.getClassLoader.getResourceAsStream(keystorePath)
-        ks.load(keystore, pw.get.toCharArray)
-
-        val keyManagerFactory: KeyManagerFactory = KeyManagerFactory.getInstance("SunX509")
-        keyManagerFactory.init(ks, pw.get.toCharArray)
-
-        val tmf: TrustManagerFactory = TrustManagerFactory.getInstance("SunX509")
-        tmf.init(ks)
-
-        val sslContext: SSLContext = SSLContext.getInstance("TLS")
-        sslContext.init(keyManagerFactory.getKeyManagers, tmf.getTrustManagers, new SecureRandom)
-
-        Some {
-          val httpsCC = ConnectionContext.https(sslContext)
-          sslContext.getDefaultSSLParameters.getCipherSuites.foreach(println)
-          httpsCC.enabledCipherSuites.foreach(_.foreach(println))
-          httpsCC
-        }
-
-      } else None
 
       ActorSystem(
         Behaviors.setup[Any] { context =>
@@ -141,14 +110,8 @@ object Server {
           // needed until Akka HTTP has a 2.6 only release
           implicit val materializer: Materializer = SystemMaterializer(context.system).materializer
           implicit val classicSystem: akka.actor.ActorSystem = context.system.toClassic
-          if (https.isDefined) {
-            Http().setDefaultServerHttpContext(https.get)
-            Http()
-              .bindAndHandle(route, interface, port, connectionContext = https.get)
-          } else {
-            Http()
+          Http()
               .bindAndHandle(route, interface, port)
-          }
             // future callback, be careful not to touch actor state from in here
             .onComplete {
             case Success(b) =>
